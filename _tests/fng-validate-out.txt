@@ -1,0 +1,6 @@
+
+FATAL Error: HTTP 501
+    at fetchJson (D:\mywork\stock-alert-cloud\fng.js:68:24)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async Object.fetchKline (D:\mywork\stock-alert-cloud\fng.js:83:13)
+    at async D:\mywork\_tests\fng-validate.js:17:16
