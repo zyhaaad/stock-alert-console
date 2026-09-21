@@ -124,6 +124,8 @@
   .arc{background:#fff;border-radius:16px;padding:15px 16px;margin-bottom:10px;}
   .arc .shead{margin-bottom:2px;}
   .pill{font-size:11px;color:#8b9096;background:#f2f3f5;border-radius:999px;padding:3px 9px;white-space:nowrap;}
+  /* 2026-09-21：持仓卡「高位过热」重点提示徽章（沿用 .st.warn/.bh.warn 同一套琥珀色） */
+  .ev-hot{background:#fdf6e3;color:#a07a12;font-weight:600;margin-left:6px;}
   .arc .line{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:13px;margin-top:9px;}
   .arc .line .k{color:#a0a4a9;}
   .arc .line .v{font-weight:500;text-align:right;}
@@ -310,6 +312,13 @@
   /* ===== 大盘风格驾驶舱（2026-09-19） ===== */
   .sty-hero{background:#fff;border:1px solid #ececf0;border-radius:14px;padding:14px;margin-bottom:10px;}
   .sty-date{font-size:11px;color:#a8acb2;}
+  /* 数据新鲜度徽标（2026-09-21）：刻意避开红绿，那两个色是价格专用 */
+  .sty-fr{font-size:11px;border-radius:8px;padding:2px 7px;background:#f1f1f4;color:#6d7278;}
+  .sty-fr.ok{background:#e6f1fb;color:#185fa5;}
+  .sty-fr.warn{background:#faece7;color:#993c1d;}
+  .sty-refresh{border:1px solid #e3e5e8;background:#fff;color:#6d7278;font-size:11px;
+    border-radius:10px;padding:3px 9px;cursor:pointer;font-family:inherit;}
+  .sty-refresh:active{background:#f4f5f7;}
   .sty-name{font-size:17px;font-weight:600;margin-top:6px;line-height:1.35;}
   .sty-tag{display:inline-block;font-size:11px;border-radius:8px;padding:2px 8px;margin-left:6px;vertical-align:2px;}
   .sty-tag.atk{background:#e6f1fb;color:#185fa5;}      /* 进攻档=蓝 */
@@ -2645,6 +2654,71 @@ function demoV3Data(){
 
 
 /* 仪表盘渲染：三块卡一次画完。V3/5 日线是异步的，先画「正在核验…」，算完 v3Ensure 会重画 */
+/* ===== 2026-09-21：首页持仓「跟进类靠前」+ 过热重点提示 + 卡片一年迷你走势图 =====
+   ① dashRowPrio  —— 排序优先级：0=高位过热（重点提示）/ 1=需跟进 / 2=无需操作（沉到后面）
+   ② miniTrendSvg —— 最近约 1 年日线收盘折线，纯读 G.dayBars，**零额外请求**
+   ⚠️ 不能复用 fngLineSvg：那个 Y 轴硬编码 0~100（恐贪指数专用），画价格会贴边成直线。
+   ⚠️ G.dayBars 只由 chipEnsure 为「持仓」写入（）；距触发最近/今日推荐是监控股，没有日线，故不画。
+   ⚠️ dashRowPrio 只允许读 weekStage/v3Head/G.v3Map/G.ma5Cache —— 一律纯函数，
+      **绝不调用 mlChanged**（它有副作用、会写 localStorage；每只每次渲染只能调一次）。 */
+var SPARK_DAYS = 244                 /* 约 1 年交易日 */
+var SPARK_MAXPTS = 300               /* 保真优先：1 年约 244 个交易日 ≤300 ⇒ 实际不抽样（≈每像素 1 点）。
+                                        只在窗口远超 1 年时才降采样；此前的 92 会把真实波峰波谷抹平，勿调回去。 */
+function dashRowPrio(r){
+  if(r.wsD && r.wsD.key === 'sell-overheat') return 0
+  var need = false
+  if(r.wsD && r.wsD.key && r.wsD.key !== 'trending') need = true        /* 建仓区 / 下跌未完 等关键位 */
+  if(r.hd3 && (r.hd3.k === 'good' || r.hd3.k === 'bad')) need = true    /* 主力方向明确 */
+  if(r.m5 && r.m5.st && r.m5.st.days >= 2) need = true                  /* 连站 5 日线 ≥2 天，短线偏热 */
+  return need ? 1 : 2
+}
+function miniTrendSvg(code){
+  var bars = G.dayBars && G.dayBars[code]
+  if(!bars || bars.length < 30) return ''              /* 数据不够就不画：诚实降级，不编数据 */
+  var W = 240, H = 40, n = bars.length
+  var from = n > SPARK_DAYS ? (n - SPARK_DAYS) : 0
+  var step = Math.max(1, Math.ceil((n - from) / SPARK_MAXPTS))
+  var vals = [], i
+  for(i = from; i < n; i += step) vals.push(v3CloseAt(bars, i))
+  var lastV = v3CloseAt(bars, n - 1)
+  if(vals[vals.length - 1] !== lastV) vals.push(lastV)   /* 一定画到最新一根 */
+  var mn = Infinity, mx = -Infinity
+  for(i = 0; i < vals.length; i++){
+    var v = vals[i]
+    if(!isFinite(v)) continue
+    if(v < mn) mn = v
+    if(v > mx) mx = v
+  }
+  if(!isFinite(mn) || !isFinite(mx) || !(mx > mn)) return ''
+  var pad = 3, top = pad, bot = H - pad, iw = W - pad * 2, ih = bot - top, pts = []
+  var x0 = null, x1 = null
+  for(i = 0; i < vals.length; i++){
+    if(!isFinite(vals[i])) continue
+    var x = pad + (vals.length <= 1 ? iw / 2 : iw * i / (vals.length - 1))
+    var y = top + ih * (1 - (vals[i] - mn) / (mx - mn))
+    if(x0 === null) x0 = x
+    x1 = x
+    pts.push(x.toFixed(1) + ',' + y.toFixed(1))
+  }
+  if(pts.length < 2) return ''
+  /* A 股配色：区间涨=红 #e23a3a，跌=绿 #0aa457（与全站 .up/.down 一致） */
+  var up = (isFinite(vals[0]) && lastV >= vals[0])
+  var col = up ? '#e23a3a' : '#0aa457'
+  var fill = up ? 'rgba(226,58,58,.13)' : 'rgba(10,164,87,.13)'
+  /* 起点基准虚线：一眼看出整段是运行在起点上方还是下方（配合红/绿判断趋势方向） */
+  var y0 = isFinite(vals[0]) ? (top + ih * (1 - (vals[0] - mn) / (mx - mn))) : NaN
+  var base = isFinite(y0)
+    ? '<line x1="' + pad + '" y1="' + y0.toFixed(1) + '" x2="' + (pad + iw).toFixed(1) + '" y2="' + y0.toFixed(1) + '" ' +
+      'stroke="#dcdfe4" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>'
+    : ''
+  var poly = x0.toFixed(1) + ',' + bot.toFixed(1) + ' ' + pts.join(' ') + ' ' + x1.toFixed(1) + ',' + bot.toFixed(1)
+  return '<svg class="mini-trend" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+    'style="width:100%;height:' + H + 'px;display:block;margin-top:6px;" aria-hidden="true">' +
+    base +
+    '<polygon points="' + poly + '" fill="' + fill + '" stroke="none"/>' +
+    '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + col + '" stroke-width="1.3" ' +
+      'vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/></svg>'
+}
 function renderDash(map){
   var box = $('dash'); if(!box) return
   var h = ''
@@ -2656,18 +2730,30 @@ function renderDash(map){
     h += '<div class="dcard" data-act="dash-add" data-tab="holding">' +
       '<div class="near-meta" style="margin-top:0;">还没有记录持仓 · 点这里去记一笔 ›</div></div>'
   } else {
+    /* ★ 2026-09-21：跟进类靠前 —— 先算各只信号（weekStage/v3Head/fusionVerdict 都是纯函数），
+       再按「要不要你动手」排序：高位过热（重点提示）> 其它需跟进 > 无需操作；同档保持原录入顺序。
+       ⚠️ 这里刻意不调 mlChanged（它有副作用），mlChanged 仍在下面渲染时每只只调一次。 */
+    var rows = []
+    for(var k=0;k<hs.length;k++){
+      var h0 = hs[k]
+      rows.push({ h: h0, _i: k, wsD: weekStage(h0.code), hd3: v3Head(h0.code),
+                  v3: G.v3Map[h0.code], m5: G.ma5Cache[h0.code], fvD: fusionVerdict(h0) })
+    }
+    rows.sort(function(a,b){ var d = dashRowPrio(a) - dashRowPrio(b); return d !== 0 ? d : (a._i - b._i) })
     h += '<div class="dcard">'
-    for(var i=0;i<hs.length;i++){
-      var hh = hs[i]
+    for(var i=0;i<rows.length;i++){
+      var r = rows[i], hh = r.h
+      var hot = !!(r.wsD && r.wsD.key === 'sell-overheat')   /* 过热 → 重点提示标记 */
       var eq2 = map ? map[secidOf(hh)] : null
       var px2 = (eq2 && typeof eq2.price === 'number') ? eq2.price : NaN
       var chg2 = (eq2 && typeof eq2.chg === 'number') ? eq2.chg : NaN
       var cls2 = isFinite(px2) && isFinite(chg2) ? chgClass(chg2) : 'flat'
-      var v3 = G.v3Map[hh.code]
-      var m5 = G.ma5Cache[hh.code]
+      var v3 = r.v3, m5 = r.m5
       h += '<div class="ev-row" data-act="dash-holding" data-code="' + esc(hh.code) + '">' +
         '<div class="ev-head"><span class="near-nm">' + esc(hh.name || hh.code) + '</span>' +
-        '<span class="near-cd">' + esc(hh.code) + '</span><span style="flex:1"></span>' +
+        '<span class="near-cd">' + esc(hh.code) + '</span>' +
+        (hot ? '<span class="pill ev-hot">高位过热 · 重点</span>' : '') +
+        '<span style="flex:1"></span>' +
         (isFinite(px2)
           ? '<span class="ev-px ' + cls2 + '">' + Number(px2).toFixed(2) + '</span>' +
             (isFinite(chg2) ? '<span class="pct ' + cls2 + '">' + chgText(chg2) + '</span>' : '')
@@ -2685,7 +2771,7 @@ function renderDash(map){
         }
       }
       if(hasV3){
-        var hd3 = v3Head(hh.code)
+        var hd3 = r.hd3
         if(hd3){
           var cls3 = hd3.k === 'good' ? 'v3-good' : (hd3.k === 'bad' ? 'v3-bad' : (hd3.k === 'warn' ? 'warn' : 'flat'))
           h += '<div class="ev-line"><span class="ev-k">主力</span><span class="' + cls3 + '">' +
@@ -2703,7 +2789,7 @@ function renderDash(map){
       }
       /* 中长线关键位置 S2（周/月级；只在关键位置说话，趋势运行中就明说"无需操作"）
          波段定性：非趋势态显示「· 第 N 天」，让人知道这段已经走了多久，而不是盯单日 */
-      var wsD = weekStage(hh.code)
+      var wsD = r.wsD
       if(wsD){
         var clsW = wsD.tone === 'good' ? 'v3-good' : (wsD.tone === 'bad' ? 'v3-bad' : (wsD.tone === 'warn' ? 'warn' : 'flat'))
         var isNew = (wsD.key !== 'trending') && mlChanged(hh.code, wsD.key, 'sa_ml_state_v1')
@@ -2716,7 +2802,7 @@ function renderDash(map){
           esc(wsD.act + runTxt) + '</span></div>'
       }
       /* 综合研判（短期 F4）：只在结论发生变化时才提示 —— 用户是中长线，不需要每天出信号 */
-      var fvD = fusionVerdict(hh)
+      var fvD = r.fvD
       if(fvD && mlChanged(hh.code, fvD.act + '|' + fvD.why, 'sa_ml_f4_v1')){
         var clsF = fvD.k === 'good' ? 'v3-good' : (fvD.k === 'bad' ? 'v3-bad' : 'flat')
         h += '<div class="ev-line"><span class="ev-k">综合</span><span class="' + clsF + '">' +
@@ -2725,6 +2811,8 @@ function renderDash(map){
       if(!hasM5 && !hasV3){
         h += '<div class="ev-line"><span class="ev-k">主力</span><span class="flat">正在核验…</span></div>'
       }
+      /* 卡片迷你走势：最近约 1 年日线收盘折线（读取 G.dayBars，零额外请求；数据不足时该函数返回空串） */
+      h += miniTrendSvg(hh.code)
       h += '</div>'
     }
     h += '<div class="near-meta">主力博弈：三源核验，冲突就观望 · 点某一只看持仓详情 ›</div></div>'
@@ -7231,7 +7319,45 @@ async function openPicks(){
    龙头战法管「连板接力怎么打」。两边互不掺和。
    删除优选 = 本机忽略（localStorage），不动云端存档。
    ========================================================= */
-var STYLE = { loaded:false, loading:false, data:null, err:'' }
+var STYLE = { loaded:false, loading:false, data:null, err:'', at:0 }
+
+/* ---------- 数据新鲜度（2026-09-21：用户要求"收盘后立刻更新"，先把"到底新不新"
+     摆到明面上，免得拿着昨天的快照还以为是今天的） ----------
+   云端 style.yml 在交易日 15:05（快版 draft）+ 15:40（定稿）各跑一次，
+   所以正常情况下：15:13 后能看到今天的快版，15:45 后能看到今天的定稿。 */
+function styleExpectDate(){
+  var p = bjParts(Date.now())
+  var ts = Date.UTC(p.y, p.M - 1, p.D)
+  var hhmm = p.h * 60 + p.m
+  if(hhmm < 15 * 60 + 13) ts -= 86400000        // 收盘更新还没到点，昨天那份才是"应有的最新"
+  for(var i=0;i<7;i++){
+    var d = new Date(ts)
+    var w = d.getUTCDay()
+    if(w !== 0 && w !== 6) return d.toISOString().slice(0,10)
+    ts -= 86400000
+  }
+  return todayStr()
+}
+function styleFreshHtml(st){
+  if(DEMO) return '<span class="sty-fr">演示数据</span>'
+  var d = st && st.date
+  if(!d) return ''
+  if(st.draft) return '<span class="sty-fr warn">收盘快版 · 15:40 定稿覆盖</span>'
+  if(d === styleExpectDate()) return '<span class="sty-fr ok">已更新到最新收盘</span>'
+  return '<span class="sty-fr warn">云端今日尚未生成 · 显示 ' + esc(d) + ' 收盘</span>'
+}
+/* 立即重拉存档：绕开 styleEnsure 的一次性幂等。20s 内不重复打云端。 */
+function styleHardRefresh(silent){
+  if(Date.now() - (STYLE.at||0) < 20000){ if(!silent) toast('刚拉过，稍等几秒再试'); return }
+  STYLE.at = Date.now()                      /* 成败都记时，失败重试也不能不打招呼地狂刷云端 */
+  STYLE.loaded = false; STYLE.loading = false; STYLE.err = ''
+  renderStyle()
+  styleEnsure().then(function(){
+    STYLE.at = Date.now()
+    renderStyle()
+    if(!silent) toast(STYLE.data ? ('已更新 · ' + (STYLE.data.date||'') + ' 收盘') : '没拉到最新存档')
+  })
+}
 
 /* 演示数据（?demo=1 / 预览副本）：确定性，不联网；代码取自 2026-09-19 真实运行结果 */
 function styleDemoData(){
@@ -7306,7 +7432,21 @@ async function styleFetchRaw(){
       errs.push('API ' + res.status)
     }catch(e){ errs.push('API ' + ((e && e.name === 'AbortError') ? '超时' : (e && e.message))) }
   }
-  /* raw 先：jsdelivr 有 CDN 缓存，会拿回昨天的旧存档（日期字段滞后） */
+  /* ★ 2026-09-21 实测：jsDelivr 的 gh 缓存滞后可达数天（改完后它还端着 09-19 的旧档，
+     真实已是 09-21），而 raw.githubusercontent.com 在部分网络里是"黑洞"（连不上也不拒绝）。
+     只靠这两条源，"收盘后立即更新"就变成看运气 —— 故在两者之间插一层**匿名 API**：
+     它不进任何 CDN、永远是最新的，匿名额度 60 次/小时对个人控制台足够用。 */
+  if(!getLS('sa_token')){
+    try{
+      var ra = await fngFetch('https://api.github.com/repos/' + owner + '/' + repo + '/contents/style-history.json?ref=main&t=' + Date.now(), {}, 9000)
+      if(ra.ok){
+        var ma = await ra.json()
+        if(ma && ma.content) return JSON.parse(b64ToUtf8(String(ma.content).replace(/\s/g, '')))
+        errs.push('匿名 API 无 content')
+      } else errs.push('匿名 API ' + ra.status)
+    }catch(ea){ errs.push('匿名 API ' + ((ea && ea.name === 'AbortError') ? '超时' : (ea && ea.message))) }
+  }
+  /* 最后才走 CDN：它是国内最容易连上的一条路，但内容可能是旧的，只能当兜底 */
   var urls = [
     'https://raw.githubusercontent.com/' + owner + '/' + repo + '/main/style-history.json?t=' + Date.now(),
     'https://cdn.jsdelivr.net/gh/' + owner + '/' + repo + '@main/style-history.json?t=' + Date.now()
@@ -7328,6 +7468,7 @@ async function styleEnsure(){
   try{
     STYLE.data = await styleLoadRaw()
     STYLE.loaded = true
+    STYLE.at = Date.now()
   }catch(e){
     STYLE.err = e && e.message ? e.message : String(e)
   }
@@ -7370,9 +7511,11 @@ function renderStyle(){
   var h = ''
   /* ---- 风格结论 ---- */
   h += '<div class="sty-hero">'
-  h += '<div style="display:flex;align-items:baseline;"><span class="sty-date">' + esc(st.date || '') +
+  h += '<div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;"><span class="sty-date">' + esc(st.date || '') +
        ' 收盘更新 · 引擎 ' + esc(st.styleVersion || '') +
-       (st.generatedAt && st.generatedAt !== st.date ? '（生成于 ' + esc(st.generatedAt) + '）' : '') + '</span></div>'
+       (st.generatedAt && st.generatedAt !== st.date ? '（生成于 ' + esc(st.generatedAt) + '）' : '') + '</span>' +
+       styleFreshHtml(st) +
+       '<button class="sty-refresh" data-act="styRefresh" style="margin-left:auto;">重新拉取</button></div>'
   h += '<div class="sty-name">' + esc(live.name || '—') +
        '<span class="sty-tag ' + styleTagCls(live.id) + '">' + esc(live.id === 'defense' ? '躲' : live.id === 'mixed' ? '观望' : '跟') + '</span></div>'
   if(live.why && live.why.length){
@@ -7386,7 +7529,8 @@ function renderStyle(){
   /* ---- 环境速览 ---- */
   h += '<div class="sty-env">'
   h += '<div class="cell"><div class="k">情绪周期</div><div class="v">' + esc(cyc.cycle || '缺') + (cyc.repaired ? '（修复日）' : '') + '</div></div>'
-  h += '<div class="cell"><div class="k">恐贪指数</div><div class="v">' + (st.fng != null ? esc(String(st.fng)) : '缺') + '</div></div>'
+  h += '<div class="cell"><div class="k">恐贪指数</div><div class="v">' +
+       (st.fng != null ? esc(String(st.fng)) + (st.fngDate && st.fngDate !== st.date ? '（' + esc(st.fngDate.slice(5)) + '）' : '') : '缺') + '</div></div>'
   h += '<div class="cell"><div class="k">涨停 / 跌停</div><div class="v">' + (emo.zt != null ? (emo.zt + ' / ' + (emo.dt == null ? '?' : emo.dt)) : '缺') + '</div></div>'
   h += '<div class="cell"><div class="k">空间板高度</div><div class="v">' + (emo.maxLbc != null ? emo.maxLbc + ' 板' : '缺') + '</div></div>'
   h += '<div class="cell"><div class="k">昨涨停溢价</div><div class="v">' + (emo.prem != null ? (emo.prem > 0 ? '+' : '') + (emo.prem * 100).toFixed(1) + '%' : '缺') + '</div></div>'
@@ -7477,6 +7621,7 @@ $('styleBody').addEventListener('click', function(ev){
   var b = ev.target.closest('button[data-act]')
   if(!b) return
   var act = b.getAttribute('data-act')
+  if(act === 'styRefresh'){ styleHardRefresh(false); return }
   var code = b.getAttribute('data-code'), name = b.getAttribute('data-name') || ''
   if(act === 'styDel'){
     var st = STYLE.data || {}
@@ -7604,7 +7749,13 @@ $('btnRestore').addEventListener('click', function(){
 
 /* 回到前台时静默刷新一次 */
 document.addEventListener('visibilitychange', function(){
-  if(!document.hidden && G.cfg && G.lastAt && Date.now() - G.lastAt > 60000) refreshPrice(true)
+  if(document.hidden) return
+  if(G.cfg && G.lastAt && Date.now() - G.lastAt > 60000) refreshPrice(true)
+  /* 驾驶舱：如果"该有的那份"还没到手，趁回前台补拉一次（收盘 15:13 之后才有意义） */
+  if(STYLE.data){
+    var p = bjParts(Date.now())
+    if(p.h * 60 + p.m >= 15 * 60 + 13 && STYLE.data.date !== styleExpectDate()) styleHardRefresh(true)
+  }
 })
 window.addEventListener('hashchange', checkHashForBackup)
 

@@ -200,5 +200,26 @@ console.log('== passFlow（资金连续性闸门，含缺史降级） ==')
 console.log('== 版本 ==')
 eq(ST.STYLE_VERSION, 'S1', 'STYLE_VERSION=S1')
 
-console.log('\n结果：' + pass + ' 通过 / ' + fail + ' 失败')
-process.exit(fail ? 1 : 0)
+/* ---------------- 收盘即跑的就绪判断（2026-09-21：用户要求"收盘后立即更新"） ----------------
+   ⚠️ 只测不联网的分支（waitReady 的 maxMin=0 会立刻返回），
+   否则单测会变成"联网探测器"，网络一抖就红。 */
+;(async function () {
+  console.log('== 收盘即跑（waitReady / isWeekend / bjMinutes） ==')
+  eq(ST.isWeekend('2026-09-21'), false, '周一 → 交易日')
+  eq(ST.isWeekend('2026-09-25'), false, '周五 → 交易日')
+  eq(ST.isWeekend('2026-09-19'), true, '周六 → 跳过（不当交易日）')
+  eq(ST.isWeekend('2026-09-20'), true, '周日 → 跳过（不当交易日）')
+
+  eq(ST.bjMinutes('2026-09-21T07:05:00Z'), 15 * 60 + 5, 'UTC 07:05 = 北京 15:05（快版触发点）')
+  eq(ST.bjMinutes('2026-09-21T07:40:00Z'), 15 * 60 + 40, 'UTC 07:40 = 北京 15:40（定稿触发点）')
+  eq(ST.bjMinutes('2026-09-21T16:00:00Z'), 0, 'UTC 16:00 = 北京次日 00:00（跨日归零，不串天）')
+
+  const t0 = Date.now()
+  const r = await ST.waitReady('2026-09-21', 0)
+  ok(r.ready === true, 'wait=0 → 直接按就绪处理（不阻塞、不等网络）')
+  eq(r.waitedMin, 0, 'wait=0 → 等待时长 0')
+  ok(Date.now() - t0 < 500, 'wait=0 → 不发任何请求（实测 ' + (Date.now() - t0) + 'ms，超时说明它偷偷联网了）')
+
+  console.log('\n结果：' + pass + ' 通过 / ' + fail + ' 失败')
+  process.exit(fail ? 1 : 0)
+})()

@@ -1410,6 +1410,145 @@ vc.on('error', (...a) => errors.push('console.error: ' + a.join(' ')));
   w.writeCache();
   eq(w.readCache(), null, '★ 演示模式不写本地缓存（不会把示例数据当成真实数据顶上来）');
 
+  /* ---------- 2026-09-21：首页持仓「跟进类靠前 / 过热重点提示 / 一年迷你走势图」 ----------
+     规格依据：用户「首页持仓股跟进类的显示靠前，过热的重点提示，卡片增加最近1年日线迷你走势图」。 */
+  {
+    /* 去注释源码（本项目铁律：注释里提到函数名会让 indexOf 负断言误判，已踩四次） */
+    const noCmt = (s) => String(s)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+
+    /* ① 排序优先级（纯函数，直接用假数据验证三档） */
+    ok(typeof w.dashRowPrio === 'function', '★ dashRowPrio 已实现（首页持仓排序）');
+    eq(w.dashRowPrio({ wsD: { key: 'sell-overheat' } }), 0, '过热 → 优先级 0（排最前）');
+    eq(w.dashRowPrio({ wsD: { key: 'accumulate-zone' } }), 1, '其它关键位（建仓区）→ 优先级 1');
+    eq(w.dashRowPrio({ hd3: { k: 'good' } }), 1, '主力方向明确 → 优先级 1');
+    eq(w.dashRowPrio({ m5: { st: { days: 3 } } }), 1, '连站 5 日线 ≥2 天 → 优先级 1');
+    eq(w.dashRowPrio({ m5: { st: { days: 1 } } }), 2, '仅站上 1 天 → 不算需跟进');
+    eq(w.dashRowPrio({ wsD: { key: 'trending' } }), 2, '趋势运行中且无其它信号 → 优先级 2（沉到后面）');
+
+    /* ⚠️ 铁律：dashRowPrio 绝不能调 mlChanged —— 它有副作用会写 localStorage，
+       每只每次渲染只能调一次；若在排序阶段调用会把「新出现 / 第 N 天」判定吃掉 */
+    const prioSrc = noCmt((html.match(/function dashRowPrio\(r\)\{[\s\S]*?\n\}/) || [''])[0]);
+    ok(prioSrc.length > 0, '取到 dashRowPrio 函数体（用于静态校验）');
+    notHas(prioSrc, 'mlChanged', '★ dashRowPrio 不调用 mlChanged（否则会吃掉「新出现」判定）');
+
+    /* ② 迷你走势图（纯函数） */
+    ok(typeof w.miniTrendSvg === 'function', '★ miniTrendSvg 已实现（卡片一年迷你走势）');
+    eq(w.miniTrendSvg('__none__'), '', '迷你图：无日线 → 返回空串（诚实降级，不编数据）');
+    w.G = w.G || {};
+    w.G.dayBars = w.G.dayBars || {};
+    const rising = [], falling = [];
+    for (let i = 0; i < 400; i++) {
+      const up = 10 + i * 0.05, dn = 40 - i * 0.05;
+      rising.push({ d: 'x', o: up, c: up, h: up + 1, l: up - 1, v: 1 });
+      falling.push({ d: 'x', o: dn, c: dn, h: dn + 1, l: dn - 1, v: 1 });
+    }
+    w.G.dayBars['__up__'] = rising;
+    w.G.dayBars['__dn__'] = falling;
+    const upSvg = w.miniTrendSvg('__up__'), dnSvg = w.miniTrendSvg('__dn__');
+    has(upSvg, '<polyline points=', '迷你图：涨势画出了折线点集');
+    eq((upSvg.match(/stroke="#e23a3a"/g) || []).length, 1, '★ 涨势用红色 #e23a3a（A 股红涨绿跌）');
+    eq((dnSvg.match(/stroke="#0aa457"/g) || []).length, 1, '★ 跌势用绿色 #0aa457');
+    has(upSvg, 'viewBox="0 0 240 40"', '迷你图尺寸 240×40（比 30 更能看出波动）');
+    has(upSvg, 'stroke-dasharray="3 3"', '迷你图带起点基准虚线（可判断整段在起点上/下方）');
+    has(upSvg, '<polygon points=', '迷你图带面积填充（强化波动轮廓）');
+    const upPts = ((upSvg.match(/<polyline points="([^"]+)"/) || [])[1] || '').trim().split(' ').filter(Boolean);
+    ok(upPts.length >= 240 && upPts.length <= 250,
+      '★ 一年窗口日线「全画」不降采样（实测 ' + upPts.length + ' 点，期望 240~250 —— 抽样会抹平真实波峰波谷）');
+    w.G.dayBars['__few__'] = rising.slice(0, 20);
+    eq(w.miniTrendSvg('__few__'), '', '迷你图：日线不足 30 根 → 不画');
+    delete w.G.dayBars['__up__']; delete w.G.dayBars['__dn__']; delete w.G.dayBars['__few__'];
+
+    /* ③ 首页渲染接线（静态确认，防止以后改首页时被悄悄摘掉） */
+    const dashSrc = noCmt(html.slice(html.indexOf('function renderDash(map)')));
+    has(dashSrc, 'rows.sort(function(a,b){ var d = dashRowPrio(a) - dashRowPrio(b)',
+      '★ renderDash 按 dashRowPrio 排序（跟进类靠前）');
+    has(dashSrc, 'return d !== 0 ? d : (a._i - b._i)', '同档用 _i 保序（不依赖 sort 稳定性，测试可复现）');
+    has(dashSrc, 'h += miniTrendSvg(hh.code)', '★ 每张持仓卡都渲染迷你走势图');
+    has(html, '<span class="pill ev-hot">高位过热 · 重点</span>', '★ 过热行带「高位过热 · 重点」徽章');
+    has(html, '.ev-hot{background:#fdf6e3', '徽章样式 .ev-hot 已内嵌（沿用琥珀色系）');
+  }
+
+  /* ---------- 2026-09-21 追加：大盘驾驶舱「收盘后立即更新」 ----------
+     规格依据：用户「大盘风格驾驶舱的数据要在收盘后立即更新」。
+     落地分两头：① 云端 style.js 独立成 style.yml（15:05 快版 + 15:40 定稿），
+                   不再挂在 signals.yml 的第 4 步（原来 16:05 才跑、还会被上游失败拖死）；
+                ② 控制台把「这份数据到底新不新」摆到明面上 + 支持立即重拉。 */
+  {
+    const noCmt = (s) => String(s)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+
+    /* ① 新鲜度判定（纯函数，不联网） */
+    ok(typeof w.styleExpectDate === 'function', '★ styleExpectDate 已实现（算出"现在该有的那份是哪天"）');
+    const expectD = w.styleExpectDate();
+    ok(/^\d{4}-\d{2}-\d{2}$/.test(expectD), 'styleExpectDate 返回 YYYY-MM-DD（实测 ' + expectD + '）');
+    const dw = new Date(expectD + 'T00:00:00Z').getUTCDay();
+    ok(dw !== 0 && dw !== 6, '★ 期望日必然是工作日（周六日不会营业，不该拿它当缺更新报警）');
+
+    ok(typeof w.styleFreshHtml === 'function', '★ styleFreshHtml 已实现（新鲜度徽标）');
+    has(w.styleFreshHtml({ date: expectD }), '演示数据', '演示态标注来源，不与真实数据混淆');
+    const savedDemo = w.DEMO;
+    w.DEMO = false;
+    has(w.styleFreshHtml({ date: expectD }), '已更新到最新收盘', '★ 日期=期望日 → 已更新到最新收盘');
+    has(w.styleFreshHtml({ date: expectD, draft: true }), '收盘快版 · 15:40 定稿覆盖',
+      '★ 快版（15:05 那次）如实标注 draft，不当成终值');
+    const stale = w.styleFreshHtml({ date: '2026-01-05' });
+    has(stale, '云端今日尚未生成', '★ 落后一天以上 → 明确提示未更新');
+    has(stale, '2026-01-05', '提示里带上当前这份的日期（知道自己在看哪天）');
+    eq(w.styleFreshHtml({}), '', '没有日期 → 不渲染徽标（不编造）');
+    w.DEMO = savedDemo;
+
+    /* ② 立即重拉（20s 节流，不能让用户点了就狂刷云端） */
+    ok(typeof w.styleHardRefresh === 'function', '★ styleHardRefresh 已实现（绕过 styleEnsure 的一次性幂等）');
+    const savedAt = w.STYLE.at, savedLoaded = w.STYLE.loaded, savedData = w.STYLE.data;
+    w.STYLE.at = Date.now();
+    w.styleHardRefresh(true);
+    eq(w.STYLE.loaded, true, '★ 20s 内重复触发被拦下（不重置 loaded、不发请求）');
+    w.STYLE.at = savedAt; w.STYLE.loaded = savedLoaded; w.STYLE.data = savedData;
+
+    /* ③ 接线：驾驶舱页真的把新鲜度和按钮渲染出来了 */
+    const styBody = d.getElementById('styleBody');
+    w.renderStyle();
+    has(styBody.innerHTML, 'data-act="styRefresh"', '★ 驾驶舱有「重新拉取」按钮');
+    has(styBody.innerHTML, '重新拉取', '按钮文案已上界面');
+    const freshSrc = noCmt(html.slice(html.indexOf('function renderStyle()')));
+    has(freshSrc, 'styleFreshHtml(st)', '★ renderStyle 渲染新鲜度徽标（不是只在别处算）');
+    has(freshSrc, "data-act=\"styRefresh\"", '按钮挂在 renderStyle 产物里（跟着重渲不丢）');
+
+    /* ④ 回到前台自动补拉：只在"该有的没到手 且 已过收盘更新时间"时触发 */
+    const visSrc = noCmt(html.slice(html.lastIndexOf("visibilitychange")));
+    has(visSrc, 'styleHardRefresh(true)', '★ 回前台时若数据落后，静默补拉一次');
+    has(visSrc, '15 * 60 + 13', '★ 收盘更新时间点（15:13）之前不打扰（那时昨天的才是正常的）');
+    const hySrc = noCmt((html.match(/function styleHardRefresh\(silent\)\{[\s\S]*?\n\}/) || [''])[0]);
+    ok(hySrc.length > 0, '取到 styleHardRefresh 函数体（用于静态校验）');
+    has(hySrc, 'STYLE.at = Date.now()', '★ 节流时间戳在开局就记（失败重试也不会狂刷）');
+
+    /* ⑤ 恐贪读数的日期诚实性（fng.js 16:05 才写当天值，驾驶舱 15:05 那版拿到的是昨天的） */
+    const savedSD = w.STYLE.data;
+    w.STYLE.data = Object.assign({}, savedSD || {}, { date: '2026-09-21', fng: 58, fngDate: '2026-09-18' });
+    w.renderStyle();
+    has(styBody.innerHTML, '58（09-18）', '★ 恐贪不是当天值时标出它的日期（不把昨天的温度当今天的读数）');
+    w.STYLE.data = Object.assign({}, savedSD || {}, { date: '2026-09-21', fng: 58, fngDate: '2026-09-21' });
+    w.renderStyle();
+    ok(styBody.innerHTML.indexOf('58（') < 0, '恐贪就是当天值 → 不再多标日期（不啰嗦）');
+    w.STYLE.data = savedSD;
+    w.renderStyle();
+
+    /* ⑥ 取档顺序：不被 CDN 缓存的源必须排在 CDN 之前（2026-09-21 实测：
+       jsDelivr 的 gh 缓存滞后可达数天，改完后它还端着 09-19 的旧档，真实已是 09-21） */
+    const sfr = noCmt((html.match(/async function styleFetchRaw\(\)\{[\s\S]*?\n\}/) || [''])[0]);
+    ok(sfr.length > 0, '取到 styleFetchRaw 函数体（用于静态校验取档顺序）');
+    const iAnon = sfr.indexOf('contents/style-history.json?ref=main');
+    const iCdn = sfr.indexOf('cdn.jsdelivr.net');
+    ok(iAnon > 0 && iCdn > iAnon,
+      '★ 匿名 API（不进 CDN、永远最新）排在 jsDelivr 之前 —— 只看顺序不信CDN 的自觉');
+    has(sfr, "api.github.com/repos/'", '取档尽力走 GitHub API（带 token 时更稳，匿名也能用）');
+  }
+
   /* ---------- 汇总 ---------- */
   console.log('持仓账本 DOM 测试：' + pass + ' 通过 / ' + fail + ' 失败');
   if (fail) { console.log('失败项：'); fails.forEach(f => console.log('  ✗ ' + f)); process.exit(1); }
