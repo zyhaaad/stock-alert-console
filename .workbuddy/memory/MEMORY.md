@@ -68,6 +68,11 @@
 - ⚠️ 用户问「距目标还差什么」时我列的缺口 ≠ 他要的缺口 —— 涉及其决策域（仓位/资金/偏好）先问再动手。
 
 ## 十、大盘风格驾驶舱（S1）
+- **2026-09-21 起独立排期**：`style.yml` 交易日 **15:05 快版**（`node style.js --wait=8`，等腾讯当日日K + 东财涨停池当日数据双双到位；每次抓取 20s 硬超时，总耗时有上界）+ **15:40 定稿**（资金流此时已结算完，按同一 `date` 覆盖）。**原挂在 signals.yml 第 4 步（16:05、且排在 screener/chips 之后，上游失败当天就不更新）— 已摘掉。**
+- `style.js` 新增纯函数 `bjMinutes/isWeekend/waitReady`：周末直接跳过；等满仍未拿到当日数据 → 判定非交易日跳过（节假日不再留假快照）。15:30 前生成标 `draft:true`（快版）。
+- **`fngDate` 必须落档**：`fng.js` 16:05 才写当天恐贪，驾驶舱 15:05 拿到的是**昨天**的，界面要标出日期（`58（09-18）`），不冒充今天。
+- ★ **取档源顺序（踩过的坑，别再犯）**：jsDelivr 的 gh 缓存**滞后可达数天**（改造完它还端着 09-19 的旧档、真实已是 09-21），而 `raw.githubusercontent.com` 在用户网络是**黑洞** ⇒ 实际走的正是最旧那条。正确顺序：**GitHub API（带 token → 匿名均可，不进 CDN）→ raw → jsDelivr 兜底**。匿名 API 60 次/小时对个人控制台够用。
+- 前端：`styleExpectDate/styleFreshHtml/styleHardRefresh` 三件套 + 「重新拉取」按钮（20s 节流）+ 回前台数据落后时静默补拉（15:13 前不打扰）。驾驶舱的新鲜度徽标是刻意加的 —— 用户抱怨的"没更新"有一半是"不知道它更没更新"。
 - 云端 `style.js` 每日收盘跑：七档 defense>theme-run>short-term>rotation>crowd-large>small-cap>mixed + 操作指南 + 优选 ≤3 只（资金连续 ≥2 日 + 板块流入前 20 + psGate 顶部闸门 + 冰点退潮不出票 + 止损 −5%）→ style-history.json；控制台 #pgStyle。
 - 存档 `date` 记**数据所在交易日** + `generatedAt`；控制台取 `days[days.length-1]`（结构 `{v,updated,days:[]}`）。读云端 JSON 备源 **raw.githubusercontent 先、jsdelivr 后**（CDN 缓存滞后一天）。
 - emoji 一律用 `\u{1F7E2}` 码点转义正则，绝不按字符串长度切。
