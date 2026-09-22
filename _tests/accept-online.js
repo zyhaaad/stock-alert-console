@@ -643,6 +643,32 @@ const onNoCmt = on.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, 
       chk('存档条目结构完整（retail/main/stance 三块判定都在）',
         !!one && !!one.retail && !!one.main && !!one.stance,
         one ? (Object.keys(one).join('/')) : '-');
+
+      /* ★ 2026-09-22：股东人数（holders，季度多期）—— 由 chips.js 抓东财 F10 写入。
+         ⚠️ 必须走 API 读：CDN 的 gh 缓存滞后可达数天，用 CDN 会误判成"还没写进去"。
+         上线首日归档还没跑，故此条**只提示不判失败**，等归档真带上再断言数量。 */
+      let hb = null;
+      try {
+        const rH = await get('https://api.github.com/repos/' + REPO + '/contents/chips-history.json?ref=main&t=' + Date.now(),
+          { headers: { 'User-Agent': 'accept', ...(GH ? { Authorization: 'token ' + GH } : {}) } });
+        if (rH.status === 200 && rH.body) {
+          const meta = JSON.parse(rH.body);
+          if (meta && meta.content) hb = JSON.parse(Buffer.from(String(meta.content).replace(/\s/g, ''), 'base64').toString('utf8'));
+        }
+      } catch (e) { /* 读不到就退化成提示 */ }
+      if (hb && hb.stocks) {
+        const ks = Object.keys(hb.stocks);
+        let withH = 0, periods = 0;
+        for (const k of ks) {
+          const h = hb.stocks[k].holders;
+          if (Array.isArray(h) && h.length >= 2) { withH++; periods = Math.max(periods, h.length); }
+        }
+        if (withH > 0) {
+          chk('★ 归档含股东人数（holders 多期，最新 ' + periods + ' 期）', withH > 0, withH + '/' + ks.length + ' 只');
+        } else {
+          console.log('ℹ️  股东人数尚未进归档（holders 0/' + ks.length + ' 只）—— 2026-09-22 起由 chips.js 抓东财 F10 写入，等下一轮 16:05 收盘任务');
+        }
+      }
     } else {
       console.log('ℹ️  chips-history.json 尚未上线（status=' + rC1.status + '）—— 需先跑 tools/upload.js 传 chip-core.js/chips.js 并首次执行 chips.js');
     }

@@ -1549,6 +1549,83 @@ vc.on('error', (...a) => errors.push('console.error: ' + a.join(' ')));
     has(sfr, "api.github.com/repos/'", '取档尽力走 GitHub API（带 token 时更稳，匿名也能用）');
   }
 
+  /* ---------- 2026-09-22：详情页卡片增加「股东人数变化趋势图」 ----------
+     规格依据：用户「股票价格监控详情页，卡片增加股东人数变化趋势图」。
+     ⚠️ 数据边界：**季度/半年报口径**，且东财 F10 无 CORS、不支持 JSONP ⇒ 浏览器取不到，
+        只能由云端 chips.js 抓进 chips-history.json；控制台零额外请求，只读 G.chipMap。 */
+  {
+    const noCmt = (s) => String(s)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+
+    /* ① 趋势图（纯函数） */
+    ok(typeof w.holderTrendSvg === 'function', '★ holderTrendSvg 已实现（股东人数趋势图）');
+    eq(w.holderTrendSvg(null), '', '无数据 → 返回空串（不硬画、不编数据）');
+    eq(w.holderTrendSvg([{ date: '2026-06-30', num: 100000 }]), '', '只有一期 → 不画（画不出趋势）');
+
+    function series(qs) {
+      const rows = []; let n = 100000
+      for (let i = 0; i < qs.length; i++) {
+        n = Math.round(n * (1 + qs[i] / 100))
+        rows.push({ date: '202' + (4 + i) + '-06-30', num: n, ratio: qs[i], focus: '较集中' })
+      }
+      return rows
+    }
+    const downS = w.holderTrendSvg(series([-3, -2, -4, -1, -2]));   /* 户数一路降 → 筹码集中 */
+    has(downS, '<svg class="holder-trend"', '趋势图渲染出 SVG');
+    eq((downS.match(/<rect /g) || []).length, 5, '每期一根柱子（期数=柱子数）');
+    eq((downS.match(/fill="#185fa5"/g) || []).length, 4, '★ 户数下降 → 蓝色 #185fa5（筹码集中，首期无对比不算）');
+    ok(downS.indexOf('#c3c7cd') >= 0, '首期没有上期可比 → 灰（不乱配色）');
+    eq((w.holderTrendSvg(series([3, 2, 4, 1, 2])).match(/fill="#b25a1e"/g) || []).length, 4,
+      '★ 户数上升 → 琥珀/橙 #b25a1e（筹码分散）');
+    eq((w.holderTrendSvg(series([0, 0, 0, 0])).match(/fill="#c3c7cd"/g) || []).length, 4, '持平 → 灰');
+    ok(downS.indexOf('#e23a3a') < 0 && downS.indexOf('#0aa457') < 0,
+      '★ 趋势图不用红绿（红涨绿跌是价格专用色，不能被结构类图表污染）');
+
+    /* ② 数字格式化（A 股股东户数普遍万级） */
+    eq(w.holderNumTxt(580535), '58.05 万', '58.05 万（580535 户）');
+    eq(w.holderNumTxt(120000000), '1.20 亿', '过亿时换成亿');
+    eq(w.holderNumTxt(8800), '8800', '不足万 → 原样（不画成 0.88 万）');
+    eq(w.holderNumTxt(NaN), '—', '非数 → 破折号（不显示 0 或 NaN）');
+
+    /* ③ 整行渲染 + 缺源如实说 */
+    ok(typeof w.holderLineHtml === 'function', '★ holderLineHtml 已实现');
+    w.G.chipMap = w.G.chipMap || {};
+    const savedHd = w.G.chipMap['__hd__'], savedHd2 = w.G.chipMap['__hd2__'];
+    w.G.chipMap['__hd__'] = { code: '__hd__', holders: series([2, -3, -2, -4]) };
+    const hl = w.holderLineHtml('__hd__');
+    has(hl, '<svg', '有数据的股票把趋势图渲染出来');
+    has(hl, '较上期', '标出环比（季度口径的涨跌才有意义）');
+    has(hl, '2027-06-30', '★ 标出数据日期（季度口径，不能让人以为是今天的数）');
+    has(hl, '筹码集中', '户数降 → 筹码集中');
+    has(hl, 'st good', '集中 = good（蓝，沿用本卡配色约定，不碰红绿）');
+    w.G.chipMap['__hd2__'] = { code: '__hd2__' };
+    has(w.holderLineHtml('__hd2__'), '暂无数据', '★ 没有 holders → 如实说「暂无数据」，不硬画空图');
+    has(w.holderLineHtml('__nohd__'), '核算中', '连透视都没算出来 → 核算中（不是报错）');
+    delete w.G.chipMap['__hd__']; delete w.G.chipMap['__hd2__'];
+    w.G.chipMap['__hd__'] = savedHd; w.G.chipMap['__hd2__'] = savedHd2;
+
+    /* ④ 接线（防止以后改详情页时被悄悄摘掉） */
+    const vd = noCmt((html.match(/function v3DetailHtml\(code\)\{[\s\S]*?\n\}/) || [''])[0]);
+    ok(vd.length > 0, '取到 v3DetailHtml 函数体（用于静态校验）');
+    has(vd, 'h += holderLineHtml(code)', '★ 详情页渲染股东人数行（接线）');
+    has(vd, 'h += retailLineHtml(code)', '散户行仍在（本次是新增，不是替换）');
+
+    /* ⑤ 演示数据：预览/快照可复现，且 num 与 ratio 必须自洽（不能各写一套数字） */
+    const chipDemo = (typeof w.demoChipData === 'function') ? w.demoChipData() : null;
+    const dm = chipDemo && chipDemo['600519'] && chipDemo['600519'].holders;
+    ok(Array.isArray(dm) && dm.length >= 2, '演示数据带 holders（预览里能看到图）');
+    let consistent = Array.isArray(dm) && dm.length > 1;
+    if (consistent) {
+      for (let i = 1; i < dm.length; i++) {
+        const want = Math.round(dm[i - 1].num * (1 + dm[i].ratio / 100));
+        if (Math.abs(want - dm[i].num) > 1) { consistent = false; break; }
+      }
+    }
+    ok(consistent, '★ 演示序列自洽：每一期的 num 都由上一期 ×(1+ratio) 推出来（前后对不上就是造假）');
+  }
+
   /* ---------- 汇总 ---------- */
   console.log('持仓账本 DOM 测试：' + pass + ' 通过 / ' + fail + ' 失败');
   if (fail) { console.log('失败项：'); fails.forEach(f => console.log('  ✗ ' + f)); process.exit(1); }

@@ -415,6 +415,48 @@ sec('7. 总入口 analyze（数据缺失时的降级）');
   ok(/K线/.test(r.msg), '给出原因：' + r.msg);
 }
 
+/* ============================================================
+ *  股东人数序列归一化（2026-09-22 新增，供详情页趋势图）
+ *  ⚠️ 只测纯函数 normHolders —— 它把东财 F10 的 gdrs[] 变成
+ *     「升序、截断到最近 N 期」的序列；网络部分（fetchHolders）不测，
+ *     否则网络一抖单测就红。
+ * ============================================================ */
+sec('股东人数序列（normHolders）');
+{
+  const CH = require(path.join(__dirname, '..', 'stock-alert-cloud', 'chips.js'));
+  ok(typeof CH.normHolders === 'function', 'chips.js 导出 normHolders（可单测、不联网）');
+  ok(CH.HOLDER_KEEP === 12, 'HOLDER_KEEP=12（季报口径 ≈3 年，够看趋势）');
+
+  eq(CH.normHolders(null).length, 0, 'null → 空（不炸）');
+  eq(CH.normHolders([]).length, 0, '空数组 → 空');
+  eq(CH.normHolders([{ END_DATE: '2026-06-30', HOLDER_TOTAL_NUM: 0 }]).length, 0,
+    '户数为 0 的脏数据 → 过滤掉（不把 0 当真实值画出来）');
+  eq(CH.normHolders([{ HOLDER_TOTAL_NUM: 12345 }]).length, 0, '没有日期 → 过滤掉（日期是季度口径的命根子）');
+
+  /* 东财返回是**倒序**（新→旧），必须翻成升序，否则趋势图左右颠倒 */
+  const raw = [
+    { END_DATE: '2026-06-30 00:00:00', HOLDER_TOTAL_NUM: 580535, TOTAL_NUM_RATIO: 41.6516, HOLD_FOCUS: '非常分散' },
+    { END_DATE: '2026-03-31 00:00:00', HOLDER_TOTAL_NUM: 409833, TOTAL_NUM_RATIO: 8.0151, HOLD_FOCUS: '非常分散' },
+    { END_DATE: '2025-12-31 00:00:00', HOLDER_TOTAL_NUM: 379422, TOTAL_NUM_RATIO: -0.0579, HOLD_FOCUS: '非常分散' }
+  ];
+  const rows = CH.normHolders(raw);
+  eq(rows.length, 3, '三条 → 三条（none 被丢）');
+  eq(rows[0].date, '2025-12-31', '★ 升序：最旧的一期排在最前（东财给的是倒序，不翻就画反）');
+  eq(rows[2].date, '2026-06-30', '最新一期排在最后');
+  eq(rows[0].num, 379422, '户数原样取（不做任何换算，换算留给展示层）');
+  eq(rows[2].ratio, 41.65, '环比保留两位（41.6516 → 41.65）');
+  eq(rows[1].focus, '非常分散', '集中度描述原样带上');
+
+  /* 超长序列要截断，存档不许无限膨胀 —— 且截的是**最近的**那批 */
+  const many = [];
+  for (let i = 0; i < 40; i++) {
+    many.push({ END_DATE: '20' + (10 + Math.floor(i / 4)) + '-0' + (i % 4 + 1) + '-01', HOLDER_TOTAL_NUM: 100000 + i * 1000, TOTAL_NUM_RATIO: 1.1 });
+  }
+  const cut = CH.normHolders(many);
+  eq(cut.length, CH.HOLDER_KEEP, '超长序列截断到 HOLDER_KEEP 期（存档不膨胀）');
+  eq(cut[cut.length - 1].num, 139000, '★ 保留的是最近那批（最后一条=原序列最后一条，不是最旧的）');
+}
+
 /* ---------- 汇总 ---------- */
 console.log('\n' + '='.repeat(56));
 console.log('筹码透视引擎单元测试：' + pass + ' 通过 / ' + fail + ' 失败');

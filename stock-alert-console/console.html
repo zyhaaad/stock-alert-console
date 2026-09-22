@@ -1609,30 +1609,51 @@ function demoChipData(){
       main:{ tag:mainTag, tone:tone, key:MK[mainTag] || mainTag, desc:mainDesc },
       retail:{ tag:retailTag, tone:tone, key:RK[retailTag] || retailTag, desc:retailDesc },
       stance:{ tag:stanceTag, tone:tone, actionText:action, desc:actDesc },
+      /* 股东人数（季度口径）：演示数据覆盖「集中 / 分散 / 缺」三种形态，
+         与真实存档字段同名同构（[{date,num,ratio,focus}]），缺了就是 null。 */
+      holders: o.holders || null,
       notes:[]
     }
+  }
+  /* 造股东人数序列：从起点 num0 出发，按 qs[] 的环比 % 逐期递推
+     —— num 由 ratio 推出来（**自洽**，不各写一套数字，避免演示里出现前后对不上的假数据） */
+  function holderSeries(num0, dates, qs, focus){
+    var rows = [], n = num0
+    for(var i=0;i<qs.length;i++){
+      n = Math.round(n * (1 + qs[i] / 100))
+      rows.push({ date: dates[i], num: n, ratio: Math.round(qs[i] * 100) / 100, focus: focus || '' })
+    }
+    return rows
   }
   var out = {}
   out['002415'] = mk('002415', '海康威视', 32.42, 'mute',
     '锁仓', '近 5 日均量只有近 60 日的 37%，换手率处在自身低位 —— 没人愿意卖，筹码锁得很死，主力也走不掉，等风来。',
     '散户在观望', '近 5 日股价 -3.3%，散户资金没什么动作，量能也没跟上，还在磨。',
     '等风来', '拿住不动', '主力没走、也没人卖，这种时候动得越多错得越多。守住就行，等放量选方向。',
-    { avg:32.05, profit:0.494, conc:0.681, spread:0.349, mainCost:29.99, retailCost:33.94, support:31.81, pressure:33.94, m5:-5060000, m20:65790000, d5:-0.0009, d20:0.0018, vr:0.62, vr60:0.37, to:0.0086, r5:-0.0325, r20:-0.0484 })
+    { avg:32.05, profit:0.494, conc:0.681, spread:0.349, mainCost:29.99, retailCost:33.94, support:31.81, pressure:33.94, m5:-5060000, m20:65790000, d5:-0.0009, d20:0.0018, vr:0.62, vr60:0.37, to:0.0086, r5:-0.0325, r20:-0.0484,
+      /* 锁仓形态：户数一路小幅下降 → 筹码集中（蓝） */
+      holders: holderSeries(412000, ['2024-12-31','2025-03-31','2025-06-30','2025-09-30','2025-12-31','2026-03-31','2026-06-30'], [2.1, -1.4, -3.2, -2.0, -4.6, -1.8, -2.9], '较集中') })
   out['600519'] = mk('600519', '贵州茅台', 1266.37, 'good',
     '建仓/吸筹', '近 20 日主力净流入 8.42 亿（占成交额 4%），股价还没怎么涨 —— 这是主力在低位收筹码，最值得跟的阶段。',
     '散户在割肉', '近 5 日股价 -2.8%，散户净卖出 1.36 亿（占近5日成交额 7%）—— 恐慌盘在往外倒，筹码正在从散户手里转到主力手里。',
     '跟主力站一起', '拿住 / 回调可加', '主力在收筹码、股价还没透支（高出主力成本约 6%）。而且散户正在割肉离场 —— 筹码从散户转手到主力，这个位置是站在少数人这边的。',
-    { avg:1218.40, profit:0.72, conc:0.58, spread:0.28, mainCost:1196.00, retailCost:1310.50, support:1208.00, pressure:1310.50, m5:136000000, m20:842000000, d5:0.032, d20:0.041, vr:1.18, vr60:1.05, to:0.0032, r5:-0.028, r20:0.012 })
+    { avg:1218.40, profit:0.72, conc:0.58, spread:0.28, mainCost:1196.00, retailCost:1310.50, support:1208.00, pressure:1310.50, m5:136000000, m20:842000000, d5:0.032, d20:0.041, vr:1.18, vr60:1.05, to:0.0032, r5:-0.028, r20:0.012,
+      /* 吸筹形态：户数持续下降 → 筹码集中（蓝），与「主力在收筹码」的结论同向 */
+      holders: holderSeries(198000, ['2024-12-31','2025-03-31','2025-06-30','2025-09-30','2025-12-31','2026-03-31','2026-06-30'], [1.5, -2.2, -3.8, -4.1, -5.3, -3.6, -4.4], '非常集中') })
   out['600733'] = mk('600733', '北汽蓝谷', 4.51, 'bad',
     '下跌中减仓', '近 20 日股价 -13.4%、主力净流出 9016 万（占成交额 1%）—— 跌势里主力还在走，说明承接意愿不足，别指望它自己止跌。',
     '散户在抄底', '近 5 日股价 -6.0%，散户净买入 5098 万（占近5日成交额 2%）—— 越跌越买是散户最典型的动作，而主力同期在卖。下跌途中的抄底通常是接刀。',
     '别去抄底', '等主力回来再说', '下跌里散户在越跌越买、主力在往外走 —— 这是典型的"下跌中继"，不是底部。底部要等主力先回来（资金转正 + 缩量止跌）。',
-    { avg:6.00, profit:0.029, conc:0.24, spread:0.62, mainCost:NaN, retailCost:4.89, support:NaN, pressure:4.89, m5:-50980000, m20:-90160000, d5:-0.0238, d20:-0.0123, vr:1.28, vr60:1.01, to:0.0412, r5:-0.0604, r20:-0.1344 })
+    { avg:6.00, profit:0.029, conc:0.24, spread:0.62, mainCost:NaN, retailCost:4.89, support:NaN, pressure:4.89, m5:-50980000, m20:-90160000, d5:-0.0238, d20:-0.0123, vr:1.28, vr60:1.01, to:0.0412, r5:-0.0604, r20:-0.1344,
+      /* 下跌里散户越跌越买 → 户数持续上升 → 筹码分散（琥珀） */
+      holders: holderSeries(268000, ['2024-12-31','2025-03-31','2025-06-30','2025-09-30','2025-12-31','2026-03-31','2026-06-30'], [3.2, 5.8, 4.1, 7.6, 6.2, 8.4, 5.1], '非常分散') })
   out['600036'] = mk('600036', '招商银行', 33.10, 'warn',
     '高位派发', '近 20 日主力净流出 12.6 亿（占成交额 6%），股价却还在涨 —— 这是边拉边卖，主力在把筹码交给接手的人。',
     '散户在追高接筹码', '近 5 日股价 +6.1%，散户净买入 8.3 亿（占近5日成交额 9%）—— 涨上去才敢买，而主力正在卖给他们。这是最标准的接盘位置。',
     '别当接棒的', '逢高减仓', '主力在高位往外派发，散户在追高接筹码 —— 两边站反了。这种位置继续拿着，就是替主力完成最后一段派发。',
-    { avg:29.85, profit:0.92, conc:0.66, spread:0.19, mainCost:27.40, retailCost:33.60, support:31.50, pressure:33.60, m5:-83000000, m20:-1260000000, d5:-0.062, d20:-0.058, vr:1.52, vr60:1.68, to:0.0186, r5:0.061, r20:0.098 })
+    { avg:29.85, profit:0.92, conc:0.66, spread:0.19, mainCost:27.40, retailCost:33.60, support:31.50, pressure:33.60, m5:-83000000, m20:-1260000000, d5:-0.062, d20:-0.058, vr:1.52, vr60:1.68, to:0.0186, r5:0.061, r20:0.098,
+      /* 高位派发 → 户数抬头 → 筹码分散（琥珀）；且演示"缺数据"这一支：holders 不传即 null */
+      holders: holderSeries(521000, ['2024-12-31','2025-03-31','2025-06-30','2025-09-30','2025-12-31','2026-03-31','2026-06-30'], [-1.2, -0.8, 0.6, 2.4, 3.9, 5.2, 6.8], '较分散') })
   return out
 }
 
@@ -2057,6 +2078,71 @@ function retailLineHtml(code){
   }
   if(!G.chipLoaded) return '<div class="cd-desc"><b>散户</b>　核算中…</div>'
   return '<div class="cd-desc"><b>散户</b>　暂无筹码数据（该股不在云端存档，实时兜底也没取到）</div>'
+}
+
+/* =========================================================
+   股东人数变化趋势（2026-09-22 新增，用户要求：详情页卡片加趋势图）
+   口径与数据边界（先说清楚，免得被当成日频指标误读）：
+   · 股东户数 = **季度/半年报口径**，一期一个点，且要等公司披露才更新 ⇒ 图上必须标日期。
+   · 数据源是东财 F10，该接口**无 CORS、也不支持 JSONP**（实测）⇒ 浏览器拿不到，
+     只能由云端 chips.js 抓进 chips-history.json；控制台**零额外请求**，只读 G.chipMap。
+   · 常见误读提醒（写在注释里、不上界面）：户数↓=筹码集中（通常偏多）、户数↑=筹码分散
+     （散户进场，通常偏空），但它只说明"持有人结构"，不能直接当买卖信号 —— 与主力博弈
+     结论打架时，以上面主力博弈为准（同综合研判 F4 的处理）。
+   配色沿用本卡既有约定（避开红绿）：降=蓝（集中，good）/ 升=琥珀（分散，warn）/ 首期或持平=灰。
+   ========================================================= */
+var HOLDER_TREND_W = 240, HOLDER_TREND_H = 44
+function holderTrendSvg(rows){
+  if(!rows || !Array.isArray(rows) || rows.length < 2) return ''
+  var W = HOLDER_TREND_W, H = HOLDER_TREND_H, n = rows.length
+  var pad = 4, bw = Math.max(3, Math.floor((W - pad * 2) / n) - 2)
+  var lo = Infinity, hi = -Infinity, i
+  for(i=0;i<n;i++){ if(rows[i].num < lo) lo = rows[i].num; if(rows[i].num > hi) hi = rows[i].num }
+  if(!isFinite(lo) || !isFinite(hi) || hi <= 0) return ''
+  /* 让最短的一根也看得见（底部留 18% 高度），否则低位期会缩成一条线 */
+  var base = lo - (hi - lo) * 0.18
+  var span = Math.max(1e-9, hi - base)
+  var s = '<svg class="holder-trend" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+    'style="width:100%;height:44px;display:block;margin-top:6px;">'
+  s += '<line x1="0" y1="' + (H - 0.5) + '" x2="' + W + '" y2="' + (H - 0.5) + '" stroke="#eceef1" stroke-width="1"/>'
+  for(i=0;i<n;i++){
+    var v = rows[i].num
+    var hgt = Math.max(2, Math.round((v - base) / span * (H - 8)))
+    var x = Math.round(pad + i * ((W - pad * 2) / n))
+    var y = H - 1 - hgt
+    var prev = i > 0 ? rows[i-1].num : null
+    var col = (prev == null || !isFinite(prev) || v === prev) ? '#c3c7cd'
+      : (v < prev ? '#185fa5' : '#b25a1e')       /* 降=蓝（集中）/ 升=橙（分散） */
+    s += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + hgt + '" fill="' + col + '" rx="1"/>'
+  }
+  s += '</svg>'
+  return s
+}
+/* 一行结论 + 趋势图；缺数据如实说（不做无数据硬画） */
+function holderLineHtml(code){
+  var p = G.chipMap && G.chipMap[code]
+  var rows = p && p.holders
+  if(!p) return '<div class="cd-stat mute">股东人数　核算中…</div>'
+  if(!rows || rows.length < 2) return '<div class="cd-stat mute">股东人数　暂无数据（季度口径，云端下一轮收盘后补齐）</div>'
+  var t = rows[rows.length - 1], prev = rows[rows.length - 2]
+  var diff = t.num - prev.num
+  var dirCls = diff < 0 ? 'good' : (diff > 0 ? 'warn' : 'mute')   /* 降=集中(蓝) 升=分散(琥珀/留意) 持平=灰 */
+  var dirTxt = diff < 0 ? '筹码集中' : (diff > 0 ? '筹码分散' : '与上期持平')
+  var ratioTxt = (t.ratio != null && isFinite(t.ratio))
+    ? (t.ratio > 0 ? '+' : '') + t.ratio + '%' : '—'
+  var h = '<div class="cd-desc"><b>股东人数</b>　' + holderNumTxt(t.num) + ' 户' +
+    '（' + esc(t.date) + '）· 较上期 ' + ratioTxt +
+    ' <span class="st ' + dirCls + '">' + dirTxt + '</span>' +
+    (t.focus ? ' · ' + esc(t.focus) : '') + '</div>'
+  h += holderTrendSvg(rows)
+  return h
+}
+/* 580535 → 58.05 万（A 股股东户数普遍在万级，用万做单位最直观） */
+function holderNumTxt(n){
+  if(!isFinite(n)) return '—'
+  if(n >= 1e8) return (n / 1e8).toFixed(2) + ' 亿'
+  if(n >= 1e4) return (n / 1e4).toFixed(2) + ' 万'
+  return String(n)
 }
 
 /* ==========================================================
@@ -2568,6 +2654,8 @@ function v3DetailHtml(code){
   h += '<div class="cd-act ' + hd.k + '"><b>主力 → ' + esc(hd.t) + '</b><br>' + esc(hd.a) + '</div>'
   /* ② 散户在做什么（纯展示：读 chipMap 已算好的结果，零额外请求，不参与 V3 投票） */
   h += retailLineHtml(code)
+  /* ②b 股东人数变化趋势（2026-09-22 新增）：季度口径，一行结论 + 柱状趋势图，零额外请求 */
+  h += holderLineHtml(code)
   /* ③ 综合研判 F4（2026-09-20 降级）：筹码透视 + 价格结构融合的那一句结论。
      ⚠️ 用户反馈它常与主力博弈（V3）打架（V3 说回补吸筹、综合却说主力撤退），
         所以从彩色结论块降为**中性状态条**：看得到，但不抢主结论的视觉权重、也不当操作依据。
